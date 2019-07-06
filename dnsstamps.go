@@ -104,32 +104,42 @@ func newDNSCryptServerStamp(bin []byte) (ServerStamp, error) {
 	binLen := len(bin)
 	pos := 9
 
-	len := int(bin[pos])
-	if 1+len >= binLen-pos {
+	length := int(bin[pos])
+	if 1+length >= binLen-pos {
 		return stamp, errors.New("Invalid stamp")
 	}
 	pos++
-	stamp.ServerAddrStr = string(bin[pos : pos+len])
-	pos += len
+	stamp.ServerAddrStr = string(bin[pos : pos+length])
+	pos += length
+
 	if net.ParseIP(strings.TrimRight(strings.TrimLeft(stamp.ServerAddrStr, "["), "]")) != nil {
 		stamp.ServerAddrStr = fmt.Sprintf("%s:%d", stamp.ServerAddrStr, DefaultPort)
+	} else {
+		colIndex := strings.LastIndex(stamp.ServerAddrStr, ":")
+		if colIndex <= 0 || colIndex >= len(stamp.ServerAddrStr)-1 {
+			return stamp, errors.New("Invalid stamp (port)")
+		}
+		ipOnly := stamp.ServerAddrStr[:colIndex]
+		if net.ParseIP(ipOnly) == nil {
+			return stamp, errors.New("Invalid stamp (IP address)")
+		}
 	}
 
-	len = int(bin[pos])
-	if 1+len >= binLen-pos {
+	length = int(bin[pos])
+	if 1+length >= binLen-pos {
 		return stamp, errors.New("Invalid stamp")
 	}
 	pos++
-	stamp.ServerPk = bin[pos : pos+len]
-	pos += len
+	stamp.ServerPk = bin[pos : pos+length]
+	pos += length
 
-	len = int(bin[pos])
-	if len >= binLen-pos {
+	length = int(bin[pos])
+	if length >= binLen-pos {
 		return stamp, errors.New("Invalid stamp")
 	}
 	pos++
-	stamp.ProviderName = string(bin[pos : pos+len])
-	pos += len
+	stamp.ProviderName = string(bin[pos : pos+length])
+	pos += length
 
 	if pos != binLen {
 		return stamp, errors.New("Invalid stamp (garbage after end)")
@@ -148,45 +158,45 @@ func newDoHServerStamp(bin []byte) (ServerStamp, error) {
 	binLen := len(bin)
 	pos := 9
 
-	len := int(bin[pos])
-	if 1+len >= binLen-pos {
+	length := int(bin[pos])
+	if 1+length >= binLen-pos {
 		return stamp, errors.New("Invalid stamp")
 	}
 	pos++
-	stamp.ServerAddrStr = string(bin[pos : pos+len])
-	pos += len
+	stamp.ServerAddrStr = string(bin[pos : pos+length])
+	pos += length
 
 	for {
 		vlen := int(bin[pos])
-		len = vlen & ^0x80
-		if 1+len >= binLen-pos {
+		length = vlen & ^0x80
+		if 1+length >= binLen-pos {
 			return stamp, errors.New("Invalid stamp")
 		}
 		pos++
-		if len > 0 {
-			stamp.Hashes = append(stamp.Hashes, bin[pos:pos+len])
+		if length > 0 {
+			stamp.Hashes = append(stamp.Hashes, bin[pos:pos+length])
 		}
-		pos += len
+		pos += length
 		if vlen&0x80 != 0x80 {
 			break
 		}
 	}
 
-	len = int(bin[pos])
-	if 1+len >= binLen-pos {
+	length = int(bin[pos])
+	if 1+length >= binLen-pos {
 		return stamp, errors.New("Invalid stamp")
 	}
 	pos++
-	stamp.ProviderName = string(bin[pos : pos+len])
-	pos += len
+	stamp.ProviderName = string(bin[pos : pos+length])
+	pos += length
 
-	len = int(bin[pos])
-	if len >= binLen-pos {
+	length = int(bin[pos])
+	if length >= binLen-pos {
 		return stamp, errors.New("Invalid stamp")
 	}
 	pos++
-	stamp.Path = string(bin[pos : pos+len])
-	pos += len
+	stamp.Path = string(bin[pos : pos+length])
+	pos += length
 
 	if pos != binLen {
 		return stamp, errors.New("Invalid stamp (garbage after end)")
@@ -194,6 +204,15 @@ func newDoHServerStamp(bin []byte) (ServerStamp, error) {
 
 	if net.ParseIP(strings.TrimRight(strings.TrimLeft(stamp.ServerAddrStr, "["), "]")) != nil {
 		stamp.ServerAddrStr = fmt.Sprintf("%s:%d", stamp.ServerAddrStr, DefaultPort)
+	} else {
+		colIndex := strings.LastIndex(stamp.ServerAddrStr, ":")
+		if colIndex <= 0 || colIndex >= len(stamp.ServerAddrStr)-1 {
+			return stamp, errors.New("Invalid stamp (port)")
+		}
+		ipOnly := stamp.ServerAddrStr[:colIndex]
+		if net.ParseIP(ipOnly) == nil {
+			return stamp, errors.New("Invalid stamp (IP address)")
+		}
 	}
 
 	return stamp, nil
