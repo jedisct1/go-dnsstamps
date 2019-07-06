@@ -112,17 +112,21 @@ func newDNSCryptServerStamp(bin []byte) (ServerStamp, error) {
 	stamp.ServerAddrStr = string(bin[pos : pos+length])
 	pos += length
 
-	if net.ParseIP(strings.TrimRight(strings.TrimLeft(stamp.ServerAddrStr, "["), "]")) != nil {
+	colIndex := strings.LastIndex(stamp.ServerAddrStr, ":")
+	if colIndex < 0 {
+		colIndex = len(stamp.ServerAddrStr)
 		stamp.ServerAddrStr = fmt.Sprintf("%s:%d", stamp.ServerAddrStr, DefaultPort)
-	} else {
-		colIndex := strings.LastIndex(stamp.ServerAddrStr, ":")
-		if colIndex <= 0 || colIndex >= len(stamp.ServerAddrStr)-1 {
-			return stamp, errors.New("Invalid stamp (port)")
-		}
-		ipOnly := stamp.ServerAddrStr[:colIndex]
-		if net.ParseIP(ipOnly) == nil {
-			return stamp, errors.New("Invalid stamp (IP address)")
-		}
+	}
+	if colIndex >= len(stamp.ServerAddrStr)-1 {
+		return stamp, errors.New("Invalid stamp (empty port)")
+	}
+	ipOnly := stamp.ServerAddrStr[:colIndex]
+	portOnly := stamp.ServerAddrStr[colIndex+1:]
+	if _, err := strconv.ParseUint(portOnly, 10, 16); err != nil {
+		return stamp, errors.New("Invalid stamp (port range)")
+	}
+	if net.ParseIP(strings.TrimRight(strings.TrimLeft(ipOnly, "["), "]")) == nil {
+		return stamp, errors.New("Invalid stamp (IP address)")
 	}
 
 	length = int(bin[pos])
@@ -202,19 +206,22 @@ func newDoHServerStamp(bin []byte) (ServerStamp, error) {
 		return stamp, errors.New("Invalid stamp (garbage after end)")
 	}
 
-	if net.ParseIP(strings.TrimRight(strings.TrimLeft(stamp.ServerAddrStr, "["), "]")) != nil {
+	colIndex := strings.LastIndex(stamp.ServerAddrStr, ":")
+	if colIndex < 0 {
+		colIndex = len(stamp.ServerAddrStr)
 		stamp.ServerAddrStr = fmt.Sprintf("%s:%d", stamp.ServerAddrStr, DefaultPort)
-	} else {
-		colIndex := strings.LastIndex(stamp.ServerAddrStr, ":")
-		if colIndex <= 0 || colIndex >= len(stamp.ServerAddrStr)-1 {
-			return stamp, errors.New("Invalid stamp (port)")
-		}
-		ipOnly := stamp.ServerAddrStr[:colIndex]
-		if net.ParseIP(ipOnly) == nil {
-			return stamp, errors.New("Invalid stamp (IP address)")
-		}
 	}
-
+	if colIndex >= len(stamp.ServerAddrStr)-1 {
+		return stamp, errors.New("Invalid stamp (empty port)")
+	}
+	ipOnly := stamp.ServerAddrStr[:colIndex]
+	portOnly := stamp.ServerAddrStr[colIndex+1:]
+	if _, err := strconv.ParseUint(portOnly, 10, 16); err != nil {
+		return stamp, errors.New("Invalid stamp (port range)")
+	}
+	if net.ParseIP(strings.TrimRight(strings.TrimLeft(ipOnly, "["), "]")) == nil {
+		return stamp, errors.New("Invalid stamp (IP address)")
+	}
 	return stamp, nil
 }
 
