@@ -113,6 +113,10 @@ func newDNSCryptServerStamp(bin []byte) (ServerStamp, error) {
 	pos += length
 
 	colIndex := strings.LastIndex(stamp.ServerAddrStr, ":")
+	bracketIndex := strings.LastIndex(stamp.ServerAddrStr, "]")
+	if colIndex < bracketIndex {
+		colIndex = -1
+	}
 	if colIndex < 0 {
 		colIndex = len(stamp.ServerAddrStr)
 		stamp.ServerAddrStr = fmt.Sprintf("%s:%d", stamp.ServerAddrStr, DefaultPort)
@@ -207,6 +211,10 @@ func newDoHServerStamp(bin []byte) (ServerStamp, error) {
 	}
 
 	colIndex := strings.LastIndex(stamp.ServerAddrStr, ":")
+	bracketIndex := strings.LastIndex(stamp.ServerAddrStr, "]")
+	if colIndex < bracketIndex {
+		colIndex = -1
+	}
 	if colIndex < 0 {
 		colIndex = len(stamp.ServerAddrStr)
 		stamp.ServerAddrStr = fmt.Sprintf("%s:%d", stamp.ServerAddrStr, DefaultPort)
