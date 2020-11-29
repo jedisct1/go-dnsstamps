@@ -53,7 +53,7 @@ func TestDnscryptStamp(t *testing.T) {
 	}
 }
 
-func TestDNSOverHTTP2(t *testing.T) {
+func TestDNSOverHTTP_NoHashes(t *testing.T) {
 	const expected = `sdns://AgcAAAAAAAAACTEyNy4wLjAuMSDDhGvyS56TymQnTA7GfB7MXgJP_KzS10AZNQ6B_lRq5AtleGFtcGxlLmNvbQovZG5zLXF1ZXJ5`
 
 	var stamp ServerStamp
@@ -79,5 +79,18 @@ func TestDNSOverHTTP2(t *testing.T) {
 	ps := parsedStamp.String()
 	if ps != stampStr {
 		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, stampStr)
+	}
+}
+
+func TestDNSOverHTTP2_2(t *testing.T) {
+	const q9 = `sdns://AgYAAAAAAAAACDkuOS45LjEwABJkbnM5LnF1YWQ5Lm5ldDo0NDMKL2Rucy1xdWVyeQ`
+
+	parsedStamp, err := NewServerStampFromString(q9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := parsedStamp.String()
+	if ps != q9 {
+		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, q9)
 	}
 }
