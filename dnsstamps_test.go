@@ -94,3 +94,16 @@ func TestDNSOverHTTP2_2(t *testing.T) {
 		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, q9)
 	}
 }
+
+func TestODoH(t *testing.T) {
+	const stamp = `sdns://BRkAAAAAAAAACTEyNy4wLjAuMRBvZG9oLmV4YW1wbGUuY29tBi9ibG9hdA`
+
+	parsedStamp, err := NewServerStampFromString(stamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := parsedStamp.String()
+	if ps != stamp {
+		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, stamp)
+	}
+}
