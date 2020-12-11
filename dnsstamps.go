@@ -52,7 +52,7 @@ func (stampProtoType *StampProtoType) String() string {
 	case StampProtoTypeDNSCryptRelay:
 		return "Anonymized DNSCrypt"
 	default:
-		panic("Unexpected protocol")
+		return "(unknown)"
 	}
 }
 
