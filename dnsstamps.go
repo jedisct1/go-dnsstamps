@@ -335,7 +335,7 @@ func newDNSCryptRelayStamp(bin []byte) (ServerStamp, error) {
 
 func newODoHRelayStamp(bin []byte) (ServerStamp, error) {
 	stamp := ServerStamp{Proto: StampProtoTypeODoHRelay}
-	if len(bin) < 12 {
+	if len(bin) < 13 {
 		return stamp, errors.New("Stamp is too short")
 	}
 	stamp.Props = ServerInformalProperties(binary.LittleEndian.Uint64(bin[1:9]))
@@ -349,6 +349,22 @@ func newODoHRelayStamp(bin []byte) (ServerStamp, error) {
 	pos++
 	stamp.ServerAddrStr = string(bin[pos : pos+length])
 	pos += length
+
+	for {
+		vlen := int(bin[pos])
+		length = vlen & ^0x80
+		if 1+length >= binLen-pos {
+			return stamp, errors.New("Invalid stamp")
+		}
+		pos++
+		if length > 0 {
+			stamp.Hashes = append(stamp.Hashes, bin[pos:pos+length])
+		}
+		pos += length
+		if vlen&0x80 != 0x80 {
+			break
+		}
+	}
 
 	length = int(bin[pos])
 	if 1+length >= binLen-pos {
@@ -514,6 +530,20 @@ func (stamp *ServerStamp) oDohRelayString() string {
 	}
 	bin = append(bin, uint8(len(serverAddrStr)))
 	bin = append(bin, []uint8(serverAddrStr)...)
+
+	if len(stamp.Hashes) == 0 {
+		bin = append(bin, uint8(0))
+	} else {
+		last := len(stamp.Hashes) - 1
+		for i, hash := range stamp.Hashes {
+			vlen := len(hash)
+			if i < last {
+				vlen |= 0x80
+			}
+			bin = append(bin, uint8(vlen))
+			bin = append(bin, hash...)
+		}
+	}
 
 	bin = append(bin, uint8(len(stamp.ProviderName)))
 	bin = append(bin, []uint8(stamp.ProviderName)...)

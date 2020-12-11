@@ -109,7 +109,7 @@ func TestODoHTarget(t *testing.T) {
 }
 
 func TestODoHRelay(t *testing.T) {
-	const stamp = `sdns://hQcAAAAAAAAAB1s6OjFdOjEQb2RvaC5leGFtcGxlLmNvbQYvcmVsYXk`
+	const stamp = `sdns://hQcAAAAAAAAAB1s6OjFdOjGCq80CASMPZG9oLmV4YW1wbGUuY29tBi9yZWxheQ`
 
 	parsedStamp, err := NewServerStampFromString(stamp)
 	if err != nil {
