@@ -95,8 +95,21 @@ func TestDNSOverHTTP2_2(t *testing.T) {
 	}
 }
 
-func TestODoH(t *testing.T) {
-	const stamp = `sdns://BRkAAAAAAAAACTEyNy4wLjAuMRBvZG9oLmV4YW1wbGUuY29tBi9ibG9hdA`
+func TestODoHTarget(t *testing.T) {
+	const stamp = `sdns://BQcAAAAAAAAAEG9kb2guZXhhbXBsZS5jb20HL3RhcmdldA`
+
+	parsedStamp, err := NewServerStampFromString(stamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps := parsedStamp.String()
+	if ps != stamp {
+		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, stamp)
+	}
+}
+
+func TestODoHRelay(t *testing.T) {
+	const stamp = `sdns://hQcAAAAAAAAAB1s6OjFdOjEQb2RvaC5leGFtcGxlLmNvbQYvcmVsYXk`
 
 	parsedStamp, err := NewServerStampFromString(stamp)
 	if err != nil {
