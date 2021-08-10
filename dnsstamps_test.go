@@ -120,3 +120,11 @@ func TestODoHRelay(t *testing.T) {
 		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, stamp)
 	}
 }
+
+func TestRelayServerPair(t *testing.T) {
+	const stamp = `sdns://hQcAAAAAAAAAB1s6OjFdOjGCq80CASMPZG9oLmV4YW1wbGUuY29tBi9yZWxheQ/BQcAAAAAAAAAEG9kb2guZXhhbXBsZS5jb20HL3RhcmdldA`
+	_, _, err := NewRelayAndServerStampFromString(stamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
