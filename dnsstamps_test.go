@@ -6,9 +6,7 @@ import (
 	"testing"
 )
 
-var (
-	pk1 []byte
-)
+var pk1 []byte
 
 func init() {
 	var err error
