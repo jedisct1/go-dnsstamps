@@ -126,3 +126,35 @@ func TestRelayServerPair(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPlainOldDNS(t *testing.T) {
+	// [DNSSEC|No Filter|No Log] + 8.8.8.8 (no port)
+	const stamp = `sdns://AAcAAAAAAAAABzguOC44Ljg`
+	parsedStamp, err := NewServerStampFromString(stamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsedStamp.ServerAddrStr != "8.8.8.8:53" {
+		t.Errorf("expected server address 8.8.8.8 but got %q", parsedStamp.ServerAddrStr)
+	}
+	ps := parsedStamp.String()
+	if ps != stamp {
+		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, stamp)
+	}
+}
+
+func TestPlainOldDNSWithPort(t *testing.T) {
+	// [DNSSEC|No Filter|No Log] + 8.8.8.8:8053
+	const stamp = `sdns://AAcAAAAAAAAADDguOC44Ljg6ODA1Mw`
+	parsedStamp, err := NewServerStampFromString(stamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsedStamp.ServerAddrStr != "8.8.8.8:8053" {
+		t.Errorf("expected server address 8.8.8.8 but got %q", parsedStamp.ServerAddrStr)
+	}
+	ps := parsedStamp.String()
+	if ps != stamp {
+		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, stamp)
+	}
+}
