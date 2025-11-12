@@ -107,7 +107,7 @@ func TestODoHTarget(t *testing.T) {
 }
 
 func TestODoHRelay(t *testing.T) {
-	const stamp = `sdns://hQcAAAAAAAAAB1s6OjFdOjGCq80CASMPZG9oLmV4YW1wbGUuY29tBi9yZWxheQ`
+	const stamp = `sdns://hQcAAAAAAAAAB1s6OjFdOjEgw4Rr8kuek8pkJ0wOxnwezF4CT_ys0tdAGTUOgf5UauQPZG9oLmV4YW1wbGUuY29tBi9yZWxheQ`
 
 	parsedStamp, err := NewServerStampFromString(stamp)
 	if err != nil {
@@ -120,7 +120,7 @@ func TestODoHRelay(t *testing.T) {
 }
 
 func TestRelayServerPair(t *testing.T) {
-	const stamp = `sdns://hQcAAAAAAAAAB1s6OjFdOjGCq80CASMPZG9oLmV4YW1wbGUuY29tBi9yZWxheQ/BQcAAAAAAAAAEG9kb2guZXhhbXBsZS5jb20HL3RhcmdldA`
+	const stamp = `sdns://hQcAAAAAAAAAB1s6OjFdOjEgw4Rr8kuek8pkJ0wOxnwezF4CT_ys0tdAGTUOgf5UauQPZG9oLmV4YW1wbGUuY29tBi9yZWxheQ/BQEAAAAAAAAAEG9kb2guZXhhbXBsZS5jb20HL3RhcmdldA`
 	_, _, err := NewRelayAndServerStampFromString(stamp)
 	if err != nil {
 		t.Fatal(err)
@@ -886,5 +886,175 @@ func TestDNSOverQUIC_BootstrapIPv6Only(t *testing.T) {
 	ps := parsedStamp.String()
 	if ps != stampStr {
 		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, stampStr)
+	}
+}
+
+// Hash length validation tests
+
+func TestDoH_InvalidHashLength_TooShort(t *testing.T) {
+	// Create a DoH stamp with 16-byte hash (should be rejected)
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeDoH
+	stamp.ServerAddrStr = "1.1.1.1"
+	stamp.ProviderName = "cloudflare-dns.com"
+	stamp.Path = "/dns-query"
+	// 16-byte hash instead of required 32 bytes
+	stamp.Hashes = [][]uint8{{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}}
+
+	stampStr := stamp.String()
+	_, err := NewServerStampFromString(stampStr)
+	if err == nil {
+		t.Error("expected error for 16-byte hash, but got none")
+	}
+	if err != nil && err.Error() != "Invalid stamp (certificate hash must be 32 bytes)" {
+		t.Errorf("expected certificate hash error, got: %v", err)
+	}
+}
+
+func TestDoH_InvalidHashLength_TooLong(t *testing.T) {
+	// Create a DoH stamp with 48-byte hash (should be rejected)
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeDoH
+	stamp.ServerAddrStr = "8.8.8.8"
+	stamp.ProviderName = "dns.google"
+	stamp.Path = "/dns-query"
+	// 48-byte hash (oversized)
+	stamp.Hashes = [][]uint8{{
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+		0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+		0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+		0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+		0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30,
+	}}
+
+	stampStr := stamp.String()
+	_, err := NewServerStampFromString(stampStr)
+	if err == nil {
+		t.Error("expected error for 48-byte hash, but got none")
+	}
+	if err != nil && err.Error() != "Invalid stamp (certificate hash must be 32 bytes)" {
+		t.Errorf("expected certificate hash error, got: %v", err)
+	}
+}
+
+func TestDoT_InvalidHashLength(t *testing.T) {
+	// Test DoT with invalid hash length
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeTLS
+	stamp.ServerAddrStr = "9.9.9.9"
+	stamp.ProviderName = "dns.quad9.net"
+	// 20-byte hash (wrong size)
+	stamp.Hashes = [][]uint8{{
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+		0x11, 0x12, 0x13, 0x14,
+	}}
+
+	stampStr := stamp.String()
+	_, err := NewServerStampFromString(stampStr)
+	if err == nil {
+		t.Error("expected error for 20-byte hash, but got none")
+	}
+	if err != nil && err.Error() != "Invalid stamp (certificate hash must be 32 bytes)" {
+		t.Errorf("expected certificate hash error, got: %v", err)
+	}
+}
+
+func TestDoQ_InvalidHashLength(t *testing.T) {
+	// Test DoQ with 1-byte hash
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeDoQ
+	stamp.ServerAddrStr = "1.0.0.1"
+	stamp.ProviderName = "cloudflare-dns.com"
+	stamp.Hashes = [][]uint8{{0xFF}} // Just 1 byte
+
+	stampStr := stamp.String()
+	_, err := NewServerStampFromString(stampStr)
+	if err == nil {
+		t.Error("expected error for 1-byte hash, but got none")
+	}
+	if err != nil && err.Error() != "Invalid stamp (certificate hash must be 32 bytes)" {
+		t.Errorf("expected certificate hash error, got: %v", err)
+	}
+}
+
+func TestODoHRelay_InvalidHashLength(t *testing.T) {
+	// Test ODoH Relay with invalid hash length
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeODoHRelay
+	stamp.ServerAddrStr = "relay.example.com"
+	stamp.ProviderName = "relay.example.com"
+	stamp.Path = "/proxy"
+	// 31-byte hash (one byte short)
+	stamp.Hashes = [][]uint8{{
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+		0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+		0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
+	}}
+
+	stampStr := stamp.String()
+	_, err := NewServerStampFromString(stampStr)
+	if err == nil {
+		t.Error("expected error for 31-byte hash, but got none")
+	}
+	if err != nil && err.Error() != "Invalid stamp (certificate hash must be 32 bytes)" {
+		t.Errorf("expected certificate hash error, got: %v", err)
+	}
+}
+
+func TestDoH_ValidHashLength_MultipleHashes(t *testing.T) {
+	// Test that valid 32-byte hashes still work, including multiple hashes
+	hash1 := pk1 // pk1 is 32 bytes from existing tests
+	hash2 := []byte{
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
+		0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+		0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+	}
+
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeDoH
+	stamp.ServerAddrStr = "8.8.8.8"
+	stamp.ProviderName = "dns.google"
+	stamp.Path = "/dns-query"
+	stamp.Hashes = [][]uint8{hash1, hash2}
+
+	stampStr := stamp.String()
+	parsedStamp, err := NewServerStampFromString(stampStr)
+	if err != nil {
+		t.Fatalf("unexpected error for valid 32-byte hashes: %v", err)
+	}
+
+	if len(parsedStamp.Hashes) != 2 {
+		t.Errorf("expected 2 hashes but got %d", len(parsedStamp.Hashes))
+	}
+	for i, hash := range parsedStamp.Hashes {
+		if len(hash) != 32 {
+			t.Errorf("hash %d: expected 32 bytes but got %d", i, len(hash))
+		}
+	}
+}
+
+func TestDoT_InvalidHashLength_MultipleHashes_OneInvalid(t *testing.T) {
+	// Test that if one hash in a multi-hash set is invalid, parsing fails
+	hash1 := pk1 // Valid 32-byte hash
+	hash2 := []byte{0x01, 0x02, 0x03} // Invalid 3-byte hash
+
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeTLS
+	stamp.ServerAddrStr = "1.1.1.1"
+	stamp.ProviderName = "cloudflare-dns.com"
+	stamp.Hashes = [][]uint8{hash1, hash2}
+
+	stampStr := stamp.String()
+	_, err := NewServerStampFromString(stampStr)
+	if err == nil {
+		t.Error("expected error when one of multiple hashes is invalid, but got none")
+	}
+	if err != nil && err.Error() != "Invalid stamp (certificate hash must be 32 bytes)" {
+		t.Errorf("expected certificate hash error, got: %v", err)
 	}
 }

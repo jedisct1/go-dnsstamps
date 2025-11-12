@@ -281,6 +281,9 @@ func newDoHServerStamp(bin []byte) (ServerStamp, error) {
 		}
 		pos++
 		if length > 0 {
+			if length != 32 {
+				return stamp, errors.New("Invalid stamp (certificate hash must be 32 bytes)")
+			}
 			stamp.Hashes = append(stamp.Hashes, bin[pos:pos+length])
 		}
 		pos += length
@@ -384,6 +387,9 @@ func newDoTServerStamp(bin []byte) (ServerStamp, error) {
 		}
 		pos++
 		if length > 0 {
+			if length != 32 {
+				return stamp, errors.New("Invalid stamp (certificate hash must be 32 bytes)")
+			}
 			stamp.Hashes = append(stamp.Hashes, bin[pos:pos+length])
 		}
 		pos += length
@@ -479,6 +485,9 @@ func newDoQServerStamp(bin []byte) (ServerStamp, error) {
 		}
 		pos++
 		if length > 0 {
+			if length != 32 {
+				return stamp, errors.New("Invalid stamp (certificate hash must be 32 bytes)")
+			}
 			stamp.Hashes = append(stamp.Hashes, bin[pos:pos+length])
 		}
 		pos += length
@@ -650,6 +659,9 @@ func newODoHRelayStamp(bin []byte) (ServerStamp, error) {
 		}
 		pos++
 		if length > 0 {
+			if length != 32 {
+				return stamp, errors.New("Invalid stamp (certificate hash must be 32 bytes)")
+			}
 			stamp.Hashes = append(stamp.Hashes, bin[pos:pos+length])
 		}
 		pos += length
