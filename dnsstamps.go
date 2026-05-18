@@ -729,8 +729,8 @@ func hasTrailingColon(s string) bool {
 //     library versions, from the addr field; defaultPort is substituted when
 //     neither field supplied one and addr is non-empty. When addr is empty
 //     (e.g. ODoH Target, or a hostname-only DoH stamp) the result has the
-//     form ":port" (empty host) when a port was specified, and "" otherwise,
-//     so callers always find the port via net.SplitHostPort.
+//     form ":port" (empty host) when a port was specified, and "" otherwise.
+//     When non-empty, the result is always parseable by net.SplitHostPort.
 //   - providerName: the hostname with any port suffix stripped, so it is safe
 //     to use directly as a TLS SNI value or HTTP Host header.
 func parseAddrAndHostname(addr, hostname string, defaultPort uint16) (serverAddrStr, providerName string, err error) {
