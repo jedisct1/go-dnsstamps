@@ -782,26 +782,27 @@ func parseAddrAndHostname(addr, hostname string, defaultPort uint16) (serverAddr
 }
 
 // encodeAddrAndHostname produces the wire-format addr and hostname strings
-// from in-memory ServerAddrStr ("host:port") and ProviderName ("hostname").
-// Per spec the port lives on the hostname field; the addr field carries only
-// the IP. The port is omitted from the hostname field when it equals
-// defaultPort to keep encodings compact.
+// from in-memory ServerAddrStr ("host:port" or ":port") and ProviderName
+// ("hostname"). Per spec the port lives on the hostname field; the addr
+// field carries only the IP. The port is omitted from the hostname field
+// when it equals defaultPort to keep encodings compact.
 //
-// When ServerAddrStr is empty (addr field unused) the hostname is emitted
-// unchanged, preserving any port suffix the caller stored on it.
+// ServerAddrStr is the single source of truth for the port: any stray port
+// suffix on ProviderName is stripped before encoding, so a stale value
+// (left over from manual assignment by the caller) cannot override the
+// port the caller actually set via ServerAddrStr.
 func encodeAddrAndHostname(serverAddrStr, providerName string, defaultPort uint16) (addrField, hostnameField string) {
+	hostnameField, _ = splitHostnamePort(providerName)
+
 	if serverAddrStr == "" {
-		return "", providerName
+		return "", hostnameField
 	}
 
 	addrHost, addrPort := splitHostnamePort(serverAddrStr)
 	addrField = addrHost
 
-	hostnameField = providerName
 	if addrPort != "" && addrPort != strconv.Itoa(int(defaultPort)) {
-		if _, existingPort := splitHostnamePort(providerName); existingPort == "" {
-			hostnameField = providerName + ":" + addrPort
-		}
+		hostnameField = hostnameField + ":" + addrPort
 	}
 	return addrField, hostnameField
 }

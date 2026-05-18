@@ -1392,6 +1392,34 @@ func TestDoH_TrailingColonInHostnameRejected(t *testing.T) {
 	}
 }
 
+func TestDoH_ServerAddrStrPortWinsOverStaleProviderNamePort(t *testing.T) {
+	// If a caller leaves a stale ":port" on ProviderName, the encoder must
+	// not let that override ServerAddrStr's port - ServerAddrStr is the
+	// documented single source of truth.
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeDoH
+	stamp.ServerAddrStr = "1.1.1.1:443"
+	stamp.ProviderName = "cloudflare-dns.com:8443" // stale - must be ignored
+	stamp.Path = "/dns-query"
+
+	encoded := stamp.String()
+	wire := decodeStamp(t, encoded)
+	if bytes.Contains(wire, []byte(":8443")) {
+		t.Errorf("stale ProviderName port leaked to wire: %s", encoded)
+	}
+
+	parsed, err := NewServerStampFromString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != "1.1.1.1:443" {
+		t.Errorf("ServerAddrStr: want 1.1.1.1:443, got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "cloudflare-dns.com" {
+		t.Errorf("ProviderName: want cloudflare-dns.com, got %q", parsed.ProviderName)
+	}
+}
+
 func TestDoH_EmptyAddrWithPortInHostname(t *testing.T) {
 	// addr empty, hostname carries port - port must be surfaced via
 	// ServerAddrStr as ":port" and ProviderName must be SNI-safe.
