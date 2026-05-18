@@ -1,6 +1,7 @@
 package dnsstamps
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"strings"
@@ -1109,10 +1110,11 @@ func TestDoH_DefaultPortOmittedFromHostname(t *testing.T) {
 	stamp.Path = "/dns-query"
 
 	encoded := stamp.String()
-	if strings.Contains(encoded, "Y2xvdWRmbGFyZS1kbnMuY29tOjQ0Mw") {
-		// Base64-encoded "cloudflare-dns.com:443" - must not appear when
-		// the port is the default.
-		t.Errorf("default port 443 leaked into hostname field encoding: %s", encoded)
+	// Inspect the decoded wire bytes directly — a base64 substring check
+	// is unreliable because the embedded ASCII may not start on a 3-byte
+	// boundary in the binary blob.
+	if bytes.Contains(decodeStamp(t, encoded), []byte("cloudflare-dns.com:443")) {
+		t.Errorf("default port 443 leaked into wire bytes: %s", encoded)
 	}
 
 	parsed, err := NewServerStampFromString(encoded)
@@ -1275,6 +1277,148 @@ func TestDoH_InvalidPortInHostnameRejected(t *testing.T) {
 // toBase64URL is a small helper for hand-built binary stamps in tests above.
 func toBase64URL(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// decodeStamp strips the sdns:// prefix and returns the raw wire bytes so
+// assertions can look at ASCII fields directly without relying on base64
+// substring matches (which break when the embedded bytes don't align on a
+// 3-byte boundary).
+func decodeStamp(t *testing.T, stamp string) []byte {
+	t.Helper()
+	s := strings.TrimPrefix(stamp, StampScheme)
+	bin, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		t.Fatalf("decodeStamp: %v", err)
+	}
+	return bin
+}
+
+func TestODoHTarget_PortRoundTripsViaHostname(t *testing.T) {
+	// Spec section 4.6: ODoH Target has no addr field, but the hostname
+	// field may carry an optional ":port" suffix. After parse, the port
+	// must be exposed on ServerAddrStr (":port") and ProviderName must be
+	// the hostname only.
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeODoHTarget
+	stamp.ServerAddrStr = ":8443"
+	stamp.ProviderName = "odoh.example.com"
+	stamp.Path = "/dns-query"
+
+	encoded := stamp.String()
+	parsed, err := NewServerStampFromString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != ":8443" {
+		t.Errorf("ServerAddrStr: want :8443, got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "odoh.example.com" {
+		t.Errorf("ProviderName must be hostname only, got %q", parsed.ProviderName)
+	}
+}
+
+func TestODoHTarget_DefaultPortOmittedFromHostname(t *testing.T) {
+	// Port 443 is the ODoH Target default — it must not appear in the
+	// encoded hostname field, and a stamp lacking a port must parse with
+	// ServerAddrStr empty.
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeODoHTarget
+	stamp.ServerAddrStr = ":443"
+	stamp.ProviderName = "odoh.example.com"
+	stamp.Path = "/dns-query"
+
+	encoded := stamp.String()
+	if bytes.Contains(decodeStamp(t, encoded), []byte("odoh.example.com:443")) {
+		t.Errorf("default port 443 leaked into wire bytes: %s", encoded)
+	}
+
+	parsed, err := NewServerStampFromString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != "" {
+		t.Errorf("ServerAddrStr: want \"\" (default port stripped), got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "odoh.example.com" {
+		t.Errorf("ProviderName: want odoh.example.com, got %q", parsed.ProviderName)
+	}
+}
+
+func TestODoHTarget_ParseHostnamePortFromWire(t *testing.T) {
+	// Hand-built ODoH Target stamp with port suffix on the hostname field.
+	bin := []byte{
+		0x05,                                           // ODoH Target
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // props
+	}
+	hostname := "odoh.example.com:8443"
+	bin = append(bin, byte(len(hostname)))
+	bin = append(bin, []byte(hostname)...)
+	path := "/dns-query"
+	bin = append(bin, byte(len(path)))
+	bin = append(bin, []byte(path)...)
+
+	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	parsed, err := NewServerStampFromString(stampStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != ":8443" {
+		t.Errorf("ServerAddrStr: want :8443, got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "odoh.example.com" {
+		t.Errorf("ProviderName must not carry port suffix, got %q", parsed.ProviderName)
+	}
+}
+
+func TestDoH_TrailingColonInHostnameRejected(t *testing.T) {
+	bin := []byte{
+		0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+	addr := "1.1.1.1"
+	bin = append(bin, byte(len(addr)))
+	bin = append(bin, []byte(addr)...)
+	bin = append(bin, 0x00)           // no hashes
+	hostname := "cloudflare-dns.com:" // trailing colon, empty port
+	bin = append(bin, byte(len(hostname)))
+	bin = append(bin, []byte(hostname)...)
+	path := "/dns-query"
+	bin = append(bin, byte(len(path)))
+	bin = append(bin, []byte(path)...)
+
+	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	if _, err := NewServerStampFromString(stampStr); err == nil {
+		t.Error("expected error for trailing colon (empty port) in hostname")
+	}
+}
+
+func TestDoH_EmptyAddrWithPortInHostname(t *testing.T) {
+	// addr empty, hostname carries port - port must be surfaced via
+	// ServerAddrStr as ":port" and ProviderName must be SNI-safe.
+	bin := []byte{
+		0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+	bin = append(bin, 0x00) // empty addr
+	bin = append(bin, 0x00) // no hashes
+	hostname := "cloudflare-dns.com:8443"
+	bin = append(bin, byte(len(hostname)))
+	bin = append(bin, []byte(hostname)...)
+	path := "/dns-query"
+	bin = append(bin, byte(len(path)))
+	bin = append(bin, []byte(path)...)
+
+	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	parsed, err := NewServerStampFromString(stampStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != ":8443" {
+		t.Errorf("ServerAddrStr: want :8443, got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "cloudflare-dns.com" {
+		t.Errorf("ProviderName must not carry port suffix, got %q", parsed.ProviderName)
+	}
 }
 
 func TestDoT_InvalidHashLength_MultipleHashes_OneInvalid(t *testing.T) {

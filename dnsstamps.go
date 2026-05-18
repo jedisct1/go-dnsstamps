@@ -542,6 +542,15 @@ func newODoHTargetStamp(bin []byte) (ServerStamp, error) {
 		return stamp, errors.New("Invalid stamp (garbage after end)")
 	}
 
+	// ODoH Target has no addr field, but the spec still allows an optional
+	// port suffix on the hostname (section 4.6).
+	serverAddrStr, providerName, err := parseAddrAndHostname("", stamp.ProviderName, DefaultPort)
+	if err != nil {
+		return stamp, err
+	}
+	stamp.ServerAddrStr = serverAddrStr
+	stamp.ProviderName = providerName
+
 	return stamp, nil
 }
 
@@ -698,23 +707,37 @@ func splitHostnamePort(s string) (host, port string) {
 	return s[:colIndex], s[colIndex+1:]
 }
 
+// hasTrailingColon reports whether s ends with a colon that is NOT part of an
+// IPv6 bracket group — i.e. "host:", "[::1]:" and ":" all qualify, but "[::1]"
+// does not.
+func hasTrailingColon(s string) bool {
+	if !strings.HasSuffix(s, ":") {
+		return false
+	}
+	bracketIndex := strings.LastIndex(s, "]")
+	return len(s)-1 > bracketIndex
+}
+
 // parseAddrAndHostname processes the addr and hostname fields of a stamp per
-// draft-denis-dns-stamps section 4.3.2 (and the equivalent DoT/DoQ/ODoH
-// sections), where the optional port is encoded as a suffix on the hostname
-// field rather than on addr.
+// draft-denis-dns-stamps sections 4.3.2 / 4.4.2 / 4.5.2 / 4.6 / 4.8.2 (DoH,
+// DoT, DoQ, ODoH Target and ODoH Relay), where the optional port is encoded
+// as a suffix on the hostname field rather than on addr.
 //
 // Returns the values to store on ServerStamp:
 //   - serverAddrStr: "host:port" form. The port comes from the hostname field
 //     (per spec) or, for backward compatibility with stamps emitted by older
 //     library versions, from the addr field; defaultPort is substituted when
-//     neither field supplied one. Empty when addr is empty.
+//     neither field supplied one and addr is non-empty. When addr is empty
+//     (e.g. ODoH Target, or a hostname-only DoH stamp) the result has the
+//     form ":port" (empty host) when a port was specified, and "" otherwise,
+//     so callers always find the port via net.SplitHostPort.
 //   - providerName: the hostname with any port suffix stripped, so it is safe
 //     to use directly as a TLS SNI value or HTTP Host header.
-//
-// When addr is empty the spec still expects the port on hostname; in that case
-// the hostname is returned unchanged (including any port suffix) so callers
-// without an addr field still have access to the port.
 func parseAddrAndHostname(addr, hostname string, defaultPort uint16) (serverAddrStr, providerName string, err error) {
+	if hasTrailingColon(hostname) || hasTrailingColon(addr) {
+		return "", "", errors.New("Invalid stamp (empty port)")
+	}
+
 	hostnameHost, hostnamePort := splitHostnamePort(hostname)
 	if hostnamePort != "" {
 		if validatePort(hostnamePort) != nil {
@@ -729,8 +752,21 @@ func parseAddrAndHostname(addr, hostname string, defaultPort uint16) (serverAddr
 		}
 	}
 
+	// Spec puts the port on the hostname field; addr port is accepted only
+	// for backward compatibility with stamps emitted by older library
+	// versions.
+	port := hostnamePort
+	if port == "" {
+		port = addrPort
+	}
+
 	if addr == "" {
-		return "", hostname, nil
+		// No IP available — surface the port via ":port" so ProviderName
+		// stays SNI-safe and the port survives a round-trip.
+		if port == "" {
+			return "", hostnameHost, nil
+		}
+		return ":" + port, hostnameHost, nil
 	}
 
 	addrIPOnly := strings.TrimRight(strings.TrimLeft(addrHost, "["), "]")
@@ -738,10 +774,6 @@ func parseAddrAndHostname(addr, hostname string, defaultPort uint16) (serverAddr
 		return "", "", errors.New("Invalid stamp (IP address)")
 	}
 
-	port := hostnamePort
-	if port == "" {
-		port = addrPort
-	}
 	if port == "" {
 		port = strconv.Itoa(int(defaultPort))
 	}
@@ -816,6 +848,8 @@ func (stamp *ServerStamp) dnsCryptString() string {
 	bin[0] = uint8(StampProtoTypeDNSCrypt)
 	binary.LittleEndian.PutUint64(bin[1:9], uint64(stamp.Props))
 
+	// DNSCrypt has no separate hostname field, so the port stays on addr
+	// (unlike DoH/DoT/DoQ/ODoH which use encodeAddrAndHostname).
 	serverAddrStr := stamp.ServerAddrStr
 	if strings.HasSuffix(serverAddrStr, ":"+strconv.Itoa(DefaultPort)) {
 		serverAddrStr = serverAddrStr[:len(serverAddrStr)-1-len(strconv.Itoa(DefaultPort))]
@@ -977,8 +1011,12 @@ func (stamp *ServerStamp) oDohTargetString() string {
 	bin[0] = uint8(StampProtoTypeODoHTarget)
 	binary.LittleEndian.PutUint64(bin[1:9], uint64(stamp.Props))
 
-	bin = append(bin, uint8(len(stamp.ProviderName)))
-	bin = append(bin, []uint8(stamp.ProviderName)...)
+	// ODoH Target has no addr field on the wire; the port (if any) is
+	// encoded as a suffix on the hostname field per spec section 4.6.
+	_, hostnameField := encodeAddrAndHostname(stamp.ServerAddrStr, stamp.ProviderName, DefaultPort)
+
+	bin = append(bin, uint8(len(hostnameField)))
+	bin = append(bin, []uint8(hostnameField)...)
 
 	bin = append(bin, uint8(len(stamp.Path)))
 	bin = append(bin, []uint8(stamp.Path)...)
@@ -992,6 +1030,8 @@ func (stamp *ServerStamp) dnsCryptRelayString() string {
 	bin := make([]uint8, 1)
 	bin[0] = uint8(StampProtoTypeDNSCryptRelay)
 
+	// DNSCryptRelay has no separate hostname field, so the port stays on
+	// addr (unlike ODoHRelay which uses encodeAddrAndHostname).
 	serverAddrStr := stamp.ServerAddrStr
 	if strings.HasSuffix(serverAddrStr, ":"+strconv.Itoa(DefaultPort)) {
 		serverAddrStr = serverAddrStr[:len(serverAddrStr)-1-len(strconv.Itoa(DefaultPort))]
