@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"net"
 	"strings"
 	"testing"
 )
@@ -1150,7 +1151,7 @@ func TestDoH_LegacyPortInAddr_BackwardCompat(t *testing.T) {
 	bin = append(bin, byte(len(path)))
 	bin = append(bin, []byte(path)...)
 
-	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	stampStr := "sdns://" + toBase64URL(bin)
 	parsed, err := NewServerStampFromString(stampStr)
 	if err != nil {
 		t.Fatalf("legacy port-in-addr stamp failed to parse: %v", err)
@@ -1181,7 +1182,7 @@ func TestDoH_HostnamePortWinsOverAddrPort(t *testing.T) {
 	bin = append(bin, byte(len(path)))
 	bin = append(bin, []byte(path)...)
 
-	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	stampStr := "sdns://" + toBase64URL(bin)
 	parsed, err := NewServerStampFromString(stampStr)
 	if err != nil {
 		t.Fatal(err)
@@ -1268,13 +1269,16 @@ func TestDoH_InvalidPortInHostnameRejected(t *testing.T) {
 	bin = append(bin, byte(len(path)))
 	bin = append(bin, []byte(path)...)
 
-	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	stampStr := "sdns://" + toBase64URL(bin)
 	if _, err := NewServerStampFromString(stampStr); err == nil {
 		t.Error("expected error for out-of-range port in hostname field")
 	}
 }
 
 // toBase64URL is a small helper for hand-built binary stamps in tests above.
+// The encoding is base64url *without* padding, matching the on-the-wire format
+// expected by NewServerStampFromString, so callers can concatenate the result
+// after "sdns://" without further trimming.
 func toBase64URL(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
@@ -1357,7 +1361,7 @@ func TestODoHTarget_ParseHostnamePortFromWire(t *testing.T) {
 	bin = append(bin, byte(len(path)))
 	bin = append(bin, []byte(path)...)
 
-	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	stampStr := "sdns://" + toBase64URL(bin)
 	parsed, err := NewServerStampFromString(stampStr)
 	if err != nil {
 		t.Fatal(err)
@@ -1386,7 +1390,7 @@ func TestDoH_TrailingColonInHostnameRejected(t *testing.T) {
 	bin = append(bin, byte(len(path)))
 	bin = append(bin, []byte(path)...)
 
-	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	stampStr := "sdns://" + toBase64URL(bin)
 	if _, err := NewServerStampFromString(stampStr); err == nil {
 		t.Error("expected error for trailing colon (empty port) in hostname")
 	}
@@ -1436,7 +1440,7 @@ func TestDoH_EmptyAddrWithPortInHostname(t *testing.T) {
 	bin = append(bin, byte(len(path)))
 	bin = append(bin, []byte(path)...)
 
-	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	stampStr := "sdns://" + toBase64URL(bin)
 	parsed, err := NewServerStampFromString(stampStr)
 	if err != nil {
 		t.Fatal(err)
@@ -1446,6 +1450,86 @@ func TestDoH_EmptyAddrWithPortInHostname(t *testing.T) {
 	}
 	if parsed.ProviderName != "cloudflare-dns.com" {
 		t.Errorf("ProviderName must not carry port suffix, got %q", parsed.ProviderName)
+	}
+}
+
+func TestDoH_BareIPv6InAddrField(t *testing.T) {
+	// Spec-compliant stamp where the addr field carries a bare IPv6 literal
+	// (no brackets, no port) and the port lives on the hostname field. The
+	// parser must not mis-split the IPv6 on its internal colons, and the
+	// synthesized ServerAddrStr must be parseable by net.SplitHostPort
+	// (i.e. the IPv6 must be bracketed in the result).
+	bin := []byte{
+		0x02,                                           // DoH
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // props
+	}
+	addr := "2606:4700:4700::1111" // bare IPv6, no brackets, no port
+	bin = append(bin, byte(len(addr)))
+	bin = append(bin, []byte(addr)...)
+	bin = append(bin, 0x00) // no hashes
+	hostname := "cloudflare-dns.com:8443"
+	bin = append(bin, byte(len(hostname)))
+	bin = append(bin, []byte(hostname)...)
+	path := "/dns-query"
+	bin = append(bin, byte(len(path)))
+	bin = append(bin, []byte(path)...)
+
+	stampStr := "sdns://" + toBase64URL(bin)
+	parsed, err := NewServerStampFromString(stampStr)
+	if err != nil {
+		t.Fatalf("bare-IPv6-in-addr stamp failed to parse: %v", err)
+	}
+	if parsed.ServerAddrStr != "[2606:4700:4700::1111]:8443" {
+		t.Errorf("ServerAddrStr: want [2606:4700:4700::1111]:8443, got %q", parsed.ServerAddrStr)
+	}
+	if _, _, err := net.SplitHostPort(parsed.ServerAddrStr); err != nil {
+		t.Errorf("ServerAddrStr not parseable by net.SplitHostPort: %v", err)
+	}
+	if parsed.ProviderName != "cloudflare-dns.com" {
+		t.Errorf("ProviderName must be hostname only, got %q", parsed.ProviderName)
+	}
+}
+
+func TestSplitHostnamePort_IPv6AndTrailingColon(t *testing.T) {
+	cases := []struct {
+		in       string
+		wantHost string
+		wantPort string
+	}{
+		// Trailing colon (empty port) - do not split, leave caller to detect.
+		{"host:", "host:", ""},
+		{":", ":", ""},
+		// Bare IPv6 with multiple colons and no brackets - do not split.
+		{"2606:4700:4700::1111", "2606:4700:4700::1111", ""},
+		{"::1", "::1", ""},
+		// Bracketed IPv6 with port - split after the closing bracket.
+		{"[2606:4700:4700::1111]:8443", "[2606:4700:4700::1111]", "8443"},
+		{"[::1]:53", "[::1]", "53"},
+		// Bracketed IPv6 without port - do not split.
+		{"[::1]", "[::1]", ""},
+		// IPv4 + port - split on the single colon.
+		{"1.1.1.1:443", "1.1.1.1", "443"},
+		// Hostname + port - split on the single colon.
+		{"example.com:8443", "example.com", "8443"},
+		// Hostname only - no split.
+		{"example.com", "example.com", ""},
+	}
+	for _, c := range cases {
+		gotHost, gotPort := splitHostnamePort(c.in)
+		if gotHost != c.wantHost || gotPort != c.wantPort {
+			t.Errorf("splitHostnamePort(%q) = (%q, %q), want (%q, %q)",
+				c.in, gotHost, gotPort, c.wantHost, c.wantPort)
+		}
+	}
+}
+
+func TestEncodeAddrAndHostname_TrailingColonPreserved(t *testing.T) {
+	// Malformed in-memory ServerAddrStr with a trailing colon must not be
+	// silently rewritten by the encoder - otherwise an invalid input would
+	// round-trip into a different valid-looking stamp.
+	addrField, _ := encodeAddrAndHostname("host:", "example.com", 443)
+	if addrField != "host:" {
+		t.Errorf("trailing colon was silently stripped: got addrField=%q", addrField)
 	}
 }
 

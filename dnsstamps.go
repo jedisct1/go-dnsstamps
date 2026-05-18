@@ -698,10 +698,27 @@ func validatePort(port string) error {
 // splitHostnamePort splits "host", "host:port", "[ipv6]" or "[ipv6]:port" into
 // host (brackets preserved for IPv6) and port. The port is empty when absent.
 // The port string is not validated.
+//
+// To avoid mis-splitting unbracketed IPv6 literals on their internal colons,
+// the split only fires when one of these holds:
+//   - the input is bracketed and a colon follows the closing bracket, or
+//   - the input contains exactly one colon (hostname/IPv4 + port).
+//
+// A trailing colon (empty port) is also left unsplit so the caller can detect
+// and reject the malformed input rather than seeing it silently rewritten.
 func splitHostnamePort(s string) (host, port string) {
 	colIndex := strings.LastIndex(s, ":")
+	if colIndex < 0 || colIndex == len(s)-1 {
+		return s, ""
+	}
 	bracketIndex := strings.LastIndex(s, "]")
-	if colIndex < 0 || colIndex < bracketIndex {
+	if bracketIndex >= 0 {
+		if colIndex < bracketIndex {
+			return s, ""
+		}
+		return s[:colIndex], s[colIndex+1:]
+	}
+	if strings.Count(s, ":") != 1 {
 		return s, ""
 	}
 	return s[:colIndex], s[colIndex+1:]
@@ -776,6 +793,11 @@ func parseAddrAndHostname(addr, hostname string, defaultPort uint16) (serverAddr
 
 	if port == "" {
 		port = strconv.Itoa(int(defaultPort))
+	}
+
+	// Bracket unbracketed IPv6 so the result is parseable by net.SplitHostPort.
+	if strings.Contains(addrHost, ":") && !strings.HasPrefix(addrHost, "[") {
+		addrHost = "[" + addrHost + "]"
 	}
 
 	return fmt.Sprintf("%s:%s", addrHost, port), hostnameHost, nil
