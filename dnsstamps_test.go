@@ -1,6 +1,7 @@
 package dnsstamps
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"strings"
 	"testing"
@@ -81,15 +82,26 @@ func TestDNSOverHTTP_NoHashes(t *testing.T) {
 }
 
 func TestDNSOverHTTP2_2(t *testing.T) {
+	// Real-world Quad9 stamp: addr="9.9.9.10", hostname="dns9.quad9.net:443".
+	// Per spec the port belongs on the hostname field; since 443 is the DoH
+	// default, round-trip drops the explicit port and produces the canonical
+	// (shorter) form.
 	const q9 = `sdns://AgYAAAAAAAAACDkuOS45LjEwABJkbnM5LnF1YWQ5Lm5ldDo0NDMKL2Rucy1xdWVyeQ`
+	const canonical = `sdns://AgYAAAAAAAAACDkuOS45LjEwAA5kbnM5LnF1YWQ5Lm5ldAovZG5zLXF1ZXJ5`
 
 	parsedStamp, err := NewServerStampFromString(q9)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if parsedStamp.ServerAddrStr != "9.9.9.10:443" {
+		t.Errorf("expected ServerAddrStr 9.9.9.10:443, got %q", parsedStamp.ServerAddrStr)
+	}
+	if parsedStamp.ProviderName != "dns9.quad9.net" {
+		t.Errorf("expected ProviderName dns9.quad9.net (port stripped), got %q", parsedStamp.ProviderName)
+	}
 	ps := parsedStamp.String()
-	if ps != q9 {
-		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, q9)
+	if ps != canonical {
+		t.Errorf("re-parsed stamp string is %q, but canonical %q expected", ps, canonical)
 	}
 }
 
@@ -107,15 +119,35 @@ func TestODoHTarget(t *testing.T) {
 }
 
 func TestODoHRelay(t *testing.T) {
+	// Legacy ODoH relay stamp emitted with port 1 on the addr field
+	// ("[::1]:1"). The library now accepts this (backward compatibility) but
+	// re-serializes it in the spec-conformant form with port on the hostname
+	// field ("doh.example.com:1"), so the round-trip canonical form differs.
 	const stamp = `sdns://hQcAAAAAAAAAB1s6OjFdOjEgw4Rr8kuek8pkJ0wOxnwezF4CT_ys0tdAGTUOgf5UauQPZG9oLmV4YW1wbGUuY29tBi9yZWxheQ`
+	const canonical = `sdns://hQcAAAAAAAAABVs6OjFdIMOEa_JLnpPKZCdMDsZ8HsxeAk_8rNLXQBk1DoH-VGrkEWRvaC5leGFtcGxlLmNvbToxBi9yZWxheQ`
 
 	parsedStamp, err := NewServerStampFromString(stamp)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if parsedStamp.ServerAddrStr != "[::1]:1" {
+		t.Errorf("expected ServerAddrStr [::1]:1, got %q", parsedStamp.ServerAddrStr)
+	}
+	if parsedStamp.ProviderName != "doh.example.com" {
+		t.Errorf("expected ProviderName doh.example.com, got %q", parsedStamp.ProviderName)
+	}
 	ps := parsedStamp.String()
-	if ps != stamp {
-		t.Errorf("re-parsed stamp string is %q, but %q expected", ps, stamp)
+	if ps != canonical {
+		t.Errorf("re-parsed stamp string is %q, but canonical %q expected", ps, canonical)
+	}
+
+	// Re-parsing the canonical form must produce the same in-memory stamp.
+	reparsed, err := NewServerStampFromString(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reparsed.ServerAddrStr != parsedStamp.ServerAddrStr || reparsed.ProviderName != parsedStamp.ProviderName {
+		t.Errorf("canonical form does not round-trip: got addr=%q name=%q", reparsed.ServerAddrStr, reparsed.ProviderName)
 	}
 }
 
@@ -213,8 +245,10 @@ func TestDNSOverTLS_DefaultPort(t *testing.T) {
 }
 
 func TestDNSOverTLS_CustomPort(t *testing.T) {
-	// Test with custom port 8853
-	const expected = `sdns://AwcAAAAAAAAADDEuMS4xLjE6ODg1MyDDhGvyS56TymQnTA7GfB7MXgJP_KzS10AZNQ6B_lRq5BJjbG91ZGZsYXJlLWRucy5jb20`
+	// Test with custom port 8853 - per spec the port is encoded on the
+	// hostname field, so the addr field carries "1.1.1.1" and the hostname
+	// field carries "cloudflare-dns.com:8853".
+	const expected = `sdns://AwcAAAAAAAAABzEuMS4xLjEgw4Rr8kuek8pkJ0wOxnwezF4CT_ys0tdAGTUOgf5UauQXY2xvdWRmbGFyZS1kbnMuY29tOjg4NTM`
 
 	var stamp ServerStamp
 	stamp.Props |= ServerInformalPropertyDNSSEC
@@ -421,8 +455,10 @@ func TestDNSOverQUIC_DefaultPort(t *testing.T) {
 }
 
 func TestDNSOverQUIC_CustomPort(t *testing.T) {
-	// Test with custom port 8853
-	const expected = `sdns://BAcAAAAAAAAADDEuMS4xLjE6ODg1MyDDhGvyS56TymQnTA7GfB7MXgJP_KzS10AZNQ6B_lRq5BJjbG91ZGZsYXJlLWRucy5jb20`
+	// Test with custom port 8853 - per spec the port is encoded on the
+	// hostname field, so the addr field carries "1.1.1.1" and the hostname
+	// field carries "cloudflare-dns.com:8853".
+	const expected = `sdns://BAcAAAAAAAAABzEuMS4xLjEgw4Rr8kuek8pkJ0wOxnwezF4CT_ys0tdAGTUOgf5UauQXY2xvdWRmbGFyZS1kbnMuY29tOjg4NTM`
 
 	var stamp ServerStamp
 	stamp.Props |= ServerInformalPropertyDNSSEC
@@ -1038,9 +1074,212 @@ func TestDoH_ValidHashLength_MultipleHashes(t *testing.T) {
 	}
 }
 
+// Port-in-hostname tests (draft-denis-dns-stamps section 4.3.2 and friends).
+// The spec places the optional port on the hostname field, not addr.
+
+func TestDoH_PortFromHostnameField(t *testing.T) {
+	// Spec-conformant DoH stamp: port encoded on hostname field. After parse,
+	// the port is exposed on ServerAddrStr and ProviderName has no suffix.
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeDoH
+	stamp.ServerAddrStr = "1.1.1.1:8443"
+	stamp.ProviderName = "cloudflare-dns.com"
+	stamp.Path = "/dns-query"
+
+	encoded := stamp.String()
+	parsed, err := NewServerStampFromString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != "1.1.1.1:8443" {
+		t.Errorf("ServerAddrStr: want 1.1.1.1:8443, got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "cloudflare-dns.com" {
+		t.Errorf("ProviderName must not carry port suffix, got %q", parsed.ProviderName)
+	}
+}
+
+func TestDoH_DefaultPortOmittedFromHostname(t *testing.T) {
+	// When the port equals the DoH default (443), it must not be appended to
+	// the hostname field on the wire.
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeDoH
+	stamp.ServerAddrStr = "1.1.1.1:443"
+	stamp.ProviderName = "cloudflare-dns.com"
+	stamp.Path = "/dns-query"
+
+	encoded := stamp.String()
+	if strings.Contains(encoded, "Y2xvdWRmbGFyZS1kbnMuY29tOjQ0Mw") {
+		// Base64-encoded "cloudflare-dns.com:443" - must not appear when
+		// the port is the default.
+		t.Errorf("default port 443 leaked into hostname field encoding: %s", encoded)
+	}
+
+	parsed, err := NewServerStampFromString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != "1.1.1.1:443" {
+		t.Errorf("ServerAddrStr: want 1.1.1.1:443, got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "cloudflare-dns.com" {
+		t.Errorf("ProviderName: want cloudflare-dns.com, got %q", parsed.ProviderName)
+	}
+}
+
+func TestDoH_LegacyPortInAddr_BackwardCompat(t *testing.T) {
+	// Stamps emitted by older versions of this library put the port on the
+	// addr field. Parsing must still accept them and surface the port on
+	// ServerAddrStr.
+	//
+	// Wire content: addr="1.1.1.1:8443", hostname="cloudflare-dns.com".
+	bin := []byte{
+		0x02,                                           // DoH
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // props
+	}
+	addr := "1.1.1.1:8443"
+	bin = append(bin, byte(len(addr)))
+	bin = append(bin, []byte(addr)...)
+	bin = append(bin, 0x00) // no hashes
+	hostname := "cloudflare-dns.com"
+	bin = append(bin, byte(len(hostname)))
+	bin = append(bin, []byte(hostname)...)
+	path := "/dns-query"
+	bin = append(bin, byte(len(path)))
+	bin = append(bin, []byte(path)...)
+
+	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	parsed, err := NewServerStampFromString(stampStr)
+	if err != nil {
+		t.Fatalf("legacy port-in-addr stamp failed to parse: %v", err)
+	}
+	if parsed.ServerAddrStr != "1.1.1.1:8443" {
+		t.Errorf("ServerAddrStr: want 1.1.1.1:8443, got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "cloudflare-dns.com" {
+		t.Errorf("ProviderName: want cloudflare-dns.com, got %q", parsed.ProviderName)
+	}
+}
+
+func TestDoH_HostnamePortWinsOverAddrPort(t *testing.T) {
+	// If a (malformed) stamp specifies port on both fields, the spec's
+	// hostname-field port takes precedence.
+	bin := []byte{
+		0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+	addr := "1.1.1.1:111"
+	bin = append(bin, byte(len(addr)))
+	bin = append(bin, []byte(addr)...)
+	bin = append(bin, 0x00)
+	hostname := "cloudflare-dns.com:2222"
+	bin = append(bin, byte(len(hostname)))
+	bin = append(bin, []byte(hostname)...)
+	path := "/dns-query"
+	bin = append(bin, byte(len(path)))
+	bin = append(bin, []byte(path)...)
+
+	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	parsed, err := NewServerStampFromString(stampStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != "1.1.1.1:2222" {
+		t.Errorf("hostname-field port must win: want 1.1.1.1:2222, got %q", parsed.ServerAddrStr)
+	}
+}
+
+func TestDoT_PortRoundTripsViaHostname(t *testing.T) {
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeTLS
+	stamp.ServerAddrStr = "9.9.9.9:8853"
+	stamp.ProviderName = "dns.quad9.net"
+	stamp.Hashes = [][]uint8{pk1}
+
+	encoded := stamp.String()
+	parsed, err := NewServerStampFromString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != "9.9.9.9:8853" {
+		t.Errorf("ServerAddrStr: want 9.9.9.9:8853, got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "dns.quad9.net" {
+		t.Errorf("ProviderName must be hostname only, got %q", parsed.ProviderName)
+	}
+}
+
+func TestDoQ_PortRoundTripsViaHostname(t *testing.T) {
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeDoQ
+	stamp.ServerAddrStr = "[2606:4700:4700::1111]:8853"
+	stamp.ProviderName = "cloudflare-dns.com"
+	stamp.Hashes = [][]uint8{pk1}
+
+	encoded := stamp.String()
+	parsed, err := NewServerStampFromString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != "[2606:4700:4700::1111]:8853" {
+		t.Errorf("ServerAddrStr: want [2606:4700:4700::1111]:8853, got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "cloudflare-dns.com" {
+		t.Errorf("ProviderName must be hostname only, got %q", parsed.ProviderName)
+	}
+}
+
+func TestODoHRelay_PortRoundTripsViaHostname(t *testing.T) {
+	var stamp ServerStamp
+	stamp.Proto = StampProtoTypeODoHRelay
+	stamp.ServerAddrStr = "1.2.3.4:8443"
+	stamp.ProviderName = "relay.example.com"
+	stamp.Path = "/proxy"
+	stamp.Hashes = [][]uint8{pk1}
+
+	encoded := stamp.String()
+	parsed, err := NewServerStampFromString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.ServerAddrStr != "1.2.3.4:8443" {
+		t.Errorf("ServerAddrStr: want 1.2.3.4:8443, got %q", parsed.ServerAddrStr)
+	}
+	if parsed.ProviderName != "relay.example.com" {
+		t.Errorf("ProviderName must be hostname only, got %q", parsed.ProviderName)
+	}
+}
+
+func TestDoH_InvalidPortInHostnameRejected(t *testing.T) {
+	bin := []byte{
+		0x02,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+	addr := "1.1.1.1"
+	bin = append(bin, byte(len(addr)))
+	bin = append(bin, []byte(addr)...)
+	bin = append(bin, 0x00)
+	hostname := "cloudflare-dns.com:99999" // out of range
+	bin = append(bin, byte(len(hostname)))
+	bin = append(bin, []byte(hostname)...)
+	path := "/dns-query"
+	bin = append(bin, byte(len(path)))
+	bin = append(bin, []byte(path)...)
+
+	stampStr := "sdns://" + strings.TrimRight(toBase64URL(bin), "=")
+	if _, err := NewServerStampFromString(stampStr); err == nil {
+		t.Error("expected error for out-of-range port in hostname field")
+	}
+}
+
+// toBase64URL is a small helper for hand-built binary stamps in tests above.
+func toBase64URL(b []byte) string {
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
 func TestDoT_InvalidHashLength_MultipleHashes_OneInvalid(t *testing.T) {
 	// Test that if one hash in a multi-hash set is invalid, parsing fails
-	hash1 := pk1 // Valid 32-byte hash
+	hash1 := pk1                      // Valid 32-byte hash
 	hash2 := []byte{0x01, 0x02, 0x03} // Invalid 3-byte hash
 
 	var stamp ServerStamp
